@@ -12,13 +12,14 @@ public class PTTSearch
 {
 	MysqlDB mysql;
 	String startTime, endTime, timeQuery;
-	ArrayList<String> keywords, wordno, articles;
+	ArrayList<String> keywords, wordno, articles, rank, rank_cnt;
 	ArrayList<Boolean> is_and;
 	ArrayList<Article> all_articles;
 	StringBuilder result_str;
 	public PTTSearch(String request) throws ParseException, ClassNotFoundException, SQLException
 	{
-		SimpleDateFormat sdf = new SimpleDateFormat("yyyyMMddHHmmss"), pdf = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss");
+		SimpleDateFormat sdf = new SimpleDateFormat("yyyyMMddHHmmss"), 
+						 pdf = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss");
 		keywords = new ArrayList<String>();
 		wordno = new ArrayList<String>();
 		articles = new ArrayList<String>();
@@ -36,87 +37,44 @@ public class PTTSearch
 		mysql = new MysqlDB();
 		timeQuery = "(TIME>='"+startTime+"' and TIME<='"+endTime+"')";
 	}
-	public void search() throws SQLException, NumberFormatException, ParseException
+	public void search() throws SQLException, ParseException
 	{
 		int i, j;
 		String q;
-		ResultSet tmp;
-		ArrayList<String> new_articles = new ArrayList<String>();
+		ResultSet tmp, tmp2;
+		//ArrayList<String> new_articles = new ArrayList<String>();
 		// find all word_no
-		for(i=0;i<keywords.size();i++)
-		{
-			q = "select NO from GLOSSARY where WORD='"+keywords.get(i)+"'";
-			tmp = mysql.query(q);
-			if(tmp.next())
-			{
-				wordno.add(tmp.getString("NO"));
-			}
-		}
-		
 		// find articles with relation
-		q = "select ARTICLE_NO from RELATION where WORD_ID='"+wordno.get(0)+"'";
+		q = "select * from ARTICLE where NO in (select ARTICLE_NO from RELATION where WORD_ID=(select NO from GLOSSARY where WORD='"+keywords.get(0)+"') and "+timeQuery+")";
 		tmp = mysql.query(q);
 		while(tmp.next())
 		{
-			articles.add(tmp.getString("ARTICLE_NO"));
-		}
-		for(i=1;i<wordno.size();i++)
-		{
-			q = "select ARTICLE_NO from RELATION where WORD_ID='"+wordno.get(i)+"'";
-			tmp = mysql.query(q);
-			new_articles.clear();
-			while(tmp.next())
+			if(tmp.getString("TYPE").equals("t"))
 			{
-				new_articles.add(tmp.getString("ARTICLE_NO"));
-			}
-			if(is_and.get(i-1))
-			{
-				for(j=new_articles.size()-1;j>=0;j--)
-					if(!articles.contains(new_articles.get(j)))
-						new_articles.remove(j);
+				if(!articles.contains(tmp.getString("NO")))
+						articles.add(tmp.getString("NO"));
 			}
 			else
 			{
-				for(j=0;j<articles.size();j++)
-					if(!new_articles.contains(articles.get(j)))
-						new_articles.add(articles.get(j));
-			}
-			articles = new_articles;
-		}
-		for(i=0;i<articles.size();i++)	System.out.print(articles.get(i)+" ");
-		
-		//get root articles
-		new_articles.clear();
-		for(i=0;i<articles.size();i++)
-		{
-			q = "select * from ARTICLE where NO='"+articles.get(i)+"'";
-			tmp = mysql.query(q);
-			while(tmp.next() && !tmp.getString("PARENT").equals("-1"))
-			{
 				q = "select * from ARTICLE where NO='"+tmp.getString("PARENT")+"'";
-				tmp = mysql.query(q);
+				tmp2 = mysql.query(q);
+				while(tmp2.next() && !tmp2.getString("TYPE").equals("t"))
+				{
+					q = "select * from ARTICLE where NO='"+tmp2.getString("PARENT")+"'";
+					tmp2 = mysql.query(q);
+				}
+				if(!articles.contains(tmp2.getString("NO")))
+					articles.add(tmp2.getString("NO"));
 			}
-			if(!new_articles.contains(tmp.getString("NO")))
-				new_articles.add(tmp.getString("NO"));
 		}
-		articles = new_articles;
-		for(i=0;i<articles.size();i++)	System.out.print(articles.get(i)+" ");
-		
+		//get root articles
 		//get all articles title(no)
-		for(i=0;i<articles.size();i++)
-		{
-			q = "select NO from ARTICLE where "+timeQuery+" and TYPE='t' and PARENT='"+articles.get(i)+"'";
-			tmp = mysql.query(q);
-			while(tmp.next())
-				if(!articles.contains(tmp.getString("NO")))
-					articles.add(tmp.getString("NO"));
-		}
 		for(i=0;i<articles.size();i++)	System.out.print(articles.get(i)+" "); //--
 		
 		//get each article
 		result_str = new StringBuilder();
 		all_articles = new ArrayList<Article>();
-		result_str.append("[");///
+		result_str.append("{\"Articles\":[");///
 		for(i=0;i<articles.size();i++)
 		{
 			if(i>0)
@@ -124,7 +82,26 @@ public class PTTSearch
 			all_articles.add(getArticle(Integer.parseInt(articles.get(i))));
 			printArticle(all_articles.get(i));
 		}
-		result_str.append("]");///
+		
+		result_str.append("],\n\"Rank\":[");
+		//get rank
+		
+		rank = new ArrayList<String>();
+		rank_cnt = new ArrayList<String>();
+		q = "select WORD,count(*) as cnt from RELATION,GLOSSARY where RELATION.WORD_ID=GLOSSARY.NO  and ARTICLE_NO in (select ARTICLE_NO from RELATION where WORD_ID=(select NO from GLOSSARY where WORD='"+keywords.get(0)+"')) group by WORD_ID order by cnt desc limit 100";
+		tmp = mysql.query(q);
+		while(tmp.next())
+		{
+			rank.add(tmp.getString("WORD"));
+			rank_cnt.add(tmp.getString("cnt"));
+		}
+		for(i=0;i<rank.size();i++)
+		{
+			if(i>0)
+				result_str.append(",\n");
+			result_str.append("{\"Word\":\""+rank.get(i)+"\",\"Count\":\""+rank_cnt.get(i)+"\"}");
+		}
+		result_str.append("]}");///
 		System.out.print("\n\n"+result_str);
 		sendMessage(result_str.toString());
 	}
@@ -178,14 +155,14 @@ public class PTTSearch
 		result_str.append("{\n");
 		int i;
 		System.out.print("標題： "+aa.title+"\n作者： "+aa.author+"\n時間： "+aa.time+"\n\n"+aa.content+"\n\n");
-		result_str.append("標題:"+aa.title+",\n作者:"+aa.author+",\n時間:"+aa.time+",\n內文:"+aa.content+",");///
-		result_str.append("\n回應:[\n");///
+		result_str.append("\"Title\":\""+aa.title+"\",\n\"Author\":\""+aa.author+"\",\n\"Time\":\""+aa.time+"\",\n\"Content\":\""+aa.content+"\",");///
+		result_str.append("\n\"Comments\":[\n");///
 		for(i=0;i<aa.cmt_author.length;i++)
 		{
 			if(i>0)
 				result_str.append(",");
 			System.out.print(aa.cmt_type[i]+"  "+aa.cmt_author[i]+"： "+aa.cmt_content[i]+" "+aa.cmt_time[i]+"\n");
-			result_str.append("{作者:"+aa.cmt_author[i]+",內文:"+aa.cmt_content[i]+",時間:"+aa.cmt_time[i]+"}\n");
+			result_str.append("{\"Author\":\""+aa.cmt_author[i]+"\",\"Content\":\""+aa.cmt_content[i]+"\",\"Time\":\""+aa.cmt_time[i]+"\"}\n");
 		}
 		result_str.append("]");
 		result_str.append("}");
