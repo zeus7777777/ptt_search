@@ -88,7 +88,7 @@ public class PTTSearch
 		
 		rank = new ArrayList<String>();
 		rank_cnt = new ArrayList<String>();
-		q = "select WORD,count(*) as cnt from RELATION,GLOSSARY where RELATION.WORD_ID=GLOSSARY.NO  and ARTICLE_NO in (select ARTICLE_NO from RELATION where WORD_ID=(select NO from GLOSSARY where WORD='"+keywords.get(0)+"')) group by WORD_ID order by cnt desc limit 100";
+		q = "select WORD,sum(COUNT) as cnt from RELATION,GLOSSARY where "+timeQuery+"and RELATION.WORD_ID=GLOSSARY.NO  and ARTICLE_NO in (select ARTICLE_NO from RELATION where WORD_ID=(select NO from GLOSSARY where WORD='"+keywords.get(0)+"')) group by WORD_ID order by cnt desc limit 100";
 		tmp = mysql.query(q);
 		while(tmp.next())
 		{
